@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Tag da versao (ex: v2.1)'
+        description: 'Tag da versao (ex: v3.1)'
         required: true
-        default: 'v2.1'
+        default: 'v3.1'
 
 jobs:
   build-windows:
@@ -22,10 +22,10 @@ jobs:
         run: pip install customtkinter tkcalendar requests websocket-client playwright python-docx pdfplumber pillow pyinstaller
 
       - name: Build PyInstaller
-        working-directory: TangerinoAutoV2
+        working-directory: TangerinoAutoV3
         run: >
           pyinstaller --noconfirm --clean
-          --name TangerinoV2PRO
+          --name TangerinoV3PRO
           --onedir
           --windowed
           --icon "tangerino.ico"
@@ -41,16 +41,16 @@ jobs:
           --hidden-import pdfminer
           --hidden-import pdfminer.high_level
           --hidden-import pdfminer.layout
-          tangerino_v2.py
+          tangerino_v3.py
 
       - name: Compactar
-        run: Compress-Archive -Path TangerinoAutoV2/dist/TangerinoV2PRO -DestinationPath TangerinoV2PRO-windows.zip
+        run: Compress-Archive -Path TangerinoAutoV3/dist/TangerinoV3PRO -DestinationPath TangerinoV3PRO-windows.zip
         shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: TangerinoV2PRO-windows.zip
+          path: TangerinoV3PRO-windows.zip
 
   build-mac:
     runs-on: macos-latest
@@ -65,10 +65,10 @@ jobs:
         run: pip install customtkinter tkcalendar requests websocket-client playwright python-docx pdfplumber pillow pyinstaller
 
       - name: Build PyInstaller
-        working-directory: TangerinoAutoV2
+        working-directory: TangerinoAutoV3
         run: >
           pyinstaller --noconfirm --clean
-          --name TangerinoV2PRO
+          --name TangerinoV3PRO
           --onedir
           --windowed
           --add-data "tangerino.png:."
@@ -82,15 +82,15 @@ jobs:
           --hidden-import pdfminer
           --hidden-import pdfminer.high_level
           --hidden-import pdfminer.layout
-          tangerino_v2.py
+          tangerino_v3.py
 
       - name: Compactar
-        run: zip -r TangerinoV2PRO-mac.zip TangerinoAutoV2/dist/
+        run: zip -r TangerinoV3PRO-mac.zip TangerinoAutoV3/dist/
 
       - uses: actions/upload-artifact@v4
         with:
           name: mac
-          path: TangerinoV2PRO-mac.zip
+          path: TangerinoV3PRO-mac.zip
 
   release:
     needs: [build-windows, build-mac]
@@ -108,15 +108,15 @@ jobs:
           tag_name: ${{ github.event.inputs.version }}
           name: "Tangerino Auto ${{ github.event.inputs.version }}"
           files: |
-            artifacts/windows/TangerinoV2PRO-windows.zip
-            artifacts/mac/TangerinoV2PRO-mac.zip
+            artifacts/windows/TangerinoV3PRO-windows.zip
+            artifacts/mac/TangerinoV3PRO-mac.zip
           body: |
             ## Tangerino Auto ${{ github.event.inputs.version }}
 
             | Download | Sistema |
             |---|---|
-            | `TangerinoV2PRO-windows.zip` | Windows 10/11 |
-            | `TangerinoV2PRO-mac.zip` | macOS 12+ (Apple Silicon e Intel) |
+            | `TangerinoV3PRO-windows.zip` | Windows 10/11 |
+            | `TangerinoV3PRO-mac.zip` | macOS 12+ (Apple Silicon e Intel) |
 
             **Como usar:** extraia o zip e abra o executável.
             Na primeira abertura o Chromium é baixado automaticamente (~150 MB).
