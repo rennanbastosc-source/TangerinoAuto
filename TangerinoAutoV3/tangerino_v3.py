@@ -56,14 +56,16 @@ def _decoded_jwt(token):
 def _ws_dest(token):
     """Retorna o destino WebSocket correto para o usuário logado."""
     claims = _decoded_jwt(token)
-    # O JWT do Tangerino traz o ID do usuário em 'sub', 'userId' ou 'id'
-    user_id = claims.get("sub") or claims.get("userId") or claims.get("id") or 0
-    return f"/app/session/report/time-sheet/{USER_TYPE}_{user_id}"
+    # JWT do Tangerino usa 'userId' como ID numérico do usuário
+    user_id   = claims.get("userId") or 0
+    user_type = claims.get("userType") or USER_TYPE
+    return f"/app/session/report/time-sheet/{user_type}_{user_id}"
 
 def _user_name(token):
     """Retorna o nome do usuário extraído do JWT."""
     claims = _decoded_jwt(token)
-    return claims.get("name") or claims.get("username") or claims.get("sub") or "ADMINISTRATOR"
+    # JWT do Tangerino usa 'userName' para o nome completo
+    return claims.get("userName") or claims.get("name") or "ADMINISTRATOR"
 
 FOLHA_URL   = "https://app.tangerino.com.br/Tangerino/pages/folha-ponto?funcionalidade=24&wicket:pageMapName=wicket-0"
 
@@ -410,6 +412,7 @@ def solicitar_relatorio(token, data_ini, data_fim, workplace_id, log):
         log(f"[API] Status: {resp.status_code}")
         if resp.status_code == 200:
             return True, token
+        log(f"[API] Resposta: {resp.text[:300]}")
         if resp.status_code in (401, 403) and tentativa == 0:
             token = _renovar_token(log)
             if not token:
