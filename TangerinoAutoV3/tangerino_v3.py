@@ -47,7 +47,7 @@ WS_DEST     = f"/app/session/report/time-sheet/{USER_TYPE}_{USER_CODE}"
 LOGIN_URL   = "https://app.tangerino.com.br/Tangerino/pages/LoginPage"
 FOLHA_URL   = "https://app.tangerino.com.br/Tangerino/pages/folha-ponto?funcionalidade=24&wicket:pageMapName=wicket-0"
 
-PASTA_DESTINO = Path.home() / "Documents" / "Conferencia Diaria V2"
+PASTA_DESTINO = Path.home() / "Documents" / "Conferencia Diaria V3"
 PASTA_DESTINO.mkdir(exist_ok=True)
 
 EXCLUIDOS        = {"RENANN BASTOS CAVALCANTE"}
