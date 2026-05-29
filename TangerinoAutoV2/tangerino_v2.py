@@ -617,7 +617,7 @@ def gerar_docx(ocorrencias, data_str, nome_local, pasta, log):
 class TangerinoApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Tangerino Auto v2.0")
+        self.title("Tangerino Auto v3.0")
         self.resizable(False, False)
         try:
             import platform as _plat
@@ -652,7 +652,7 @@ class TangerinoApp(ctk.CTk):
         header.pack(fill="x", pady=(0, 22))
         ctk.CTkLabel(header, text="Tangerino Auto",
                      font=ctk.CTkFont(size=22, weight="bold"), text_color="white").pack(pady=(14,2))
-        ctk.CTkLabel(header, text="v2.0 — Gerador de Folha de Ponto",
+        ctk.CTkLabel(header, text="v3.0 — Gerador de Folha de Ponto",
                      font=ctk.CTkFont(size=11), text_color="#AABCD4").pack(pady=(0,14))
 
         ctk.CTkLabel(self._frame_login, text="E-mail",
@@ -782,11 +782,18 @@ class TangerinoApp(ctk.CTk):
         header.pack(fill="x", padx=20, pady=(20,10))
         ctk.CTkLabel(header, text="Tangerino Auto",
                      font=ctk.CTkFont(size=22, weight="bold"), text_color="white").pack(pady=(12,2))
-        ctk.CTkLabel(header, text="v2.0 — Gerador de Folha de Ponto",
+        ctk.CTkLabel(header, text="v3.0 — Gerador de Folha de Ponto",
                      font=ctk.CTkFont(size=12), text_color="#AABCD4").pack(pady=(0,12))
 
         ctk.CTkLabel(self, text="Local de Trabalho",
                      font=ctk.CTkFont(size=13, weight="bold"), anchor="w").pack(fill="x", padx=24, pady=(10,4))
+
+        self._busca_var = ctk.StringVar()
+        self._busca_var.trace_add("write", lambda *_: self._filtrar_locais())
+        self._busca_entry = ctk.CTkEntry(self, textvariable=self._busca_var,
+                                          placeholder_text="🔍  Pesquisar obra...",
+                                          height=32, font=ctk.CTkFont(size=12))
+        self._busca_entry.pack(fill="x", padx=20, pady=(0,4))
 
         self._locais_frame = ctk.CTkScrollableFrame(self, corner_radius=8, height=120)
         self._locais_frame.pack(fill="x", padx=20, pady=(0,4))
@@ -874,11 +881,22 @@ class TangerinoApp(ctk.CTk):
 
     def _popular(self, locais):
         self._placeholder.destroy()
+        self._checkboxes = {}  # nome → widget CTkCheckBox
         for nome, id_ in sorted(locais.items()):
-            var = ctk.BooleanVar(value=True)
+            var = ctk.BooleanVar(value=False)   # desmarcadas por padrão
             self._local_vars[nome] = (var, id_)
-            ctk.CTkCheckBox(self._locais_frame, text=nome, variable=var,
-                            font=ctk.CTkFont(size=11)).pack(anchor="w", padx=16, pady=3)
+            cb = ctk.CTkCheckBox(self._locais_frame, text=nome, variable=var,
+                                 font=ctk.CTkFont(size=11))
+            cb.pack(anchor="w", padx=16, pady=3)
+            self._checkboxes[nome] = cb
+
+    def _filtrar_locais(self):
+        termo = self._busca_var.get().lower().strip()
+        for nome, cb in self._checkboxes.items():
+            if termo in nome.lower():
+                cb.pack(anchor="w", padx=16, pady=3)
+            else:
+                cb.pack_forget()
 
     def _forcar_login(self):
         """Apaga o cache de token e reinicia a inicialização."""
@@ -894,6 +912,8 @@ class TangerinoApp(ctk.CTk):
                                          text_color="gray", font=ctk.CTkFont(size=12))
         self._placeholder.pack(anchor="w", padx=16, pady=10)
         self._local_vars.clear()
+        self._checkboxes = {}
+        self._busca_var.set("")
         self._log("[Auth] Cache de token apagado. Fazendo novo login...")
         threading.Thread(target=_inicializar,
                          args=(self._log, self._on_locais_prontos, self._on_erro),
