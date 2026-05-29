@@ -1017,6 +1017,7 @@ class TangerinoApp(ctk.CTk):
                     self._log("[DOCX] Sem ocorrências — arquivo não gerado.")
 
             self._log("\n✓  Concluído!")
+            os.startfile(str(PASTA_DESTINO))
         except Exception:
             self._log(f"✗  Erro:\n{traceback.format_exc()}")
         finally:
