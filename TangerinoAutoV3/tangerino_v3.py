@@ -37,8 +37,9 @@ ctk.set_default_color_theme("blue")
 
 # ── configurações ─────────────────────────────────────────────────────────────
 
-STATIC_AUTH = ""                    # chave base64 da API — obtida via DevTools após login
+STATIC_AUTH = ""                    # capturado automaticamente no login
 USER_TYPE   = "ADMINISTRATOR"
+_runtime    = {"static_auth": ""}   # preenchido pelo Playwright durante o login
 REPORT_API  = "https://report.tangerino.com.br/async-reports"
 WS_BASE     = "wss://report.tangerino.com.br/websocket"
 LOGIN_URL   = "https://app.tangerino.com.br/Tangerino/pages/LoginPage"
@@ -192,15 +193,18 @@ def _inicializar(log, on_locais_prontos, on_erro):
 
         # 2. token — usa cache se ainda válido
         token = _cache_valido("token", TOKEN_TTL)
-        if token:
+        cached_auth = _ler_cache().get("static_auth", "")
+        if token and cached_auth:
             log("[Login] Token em cache reutilizado (sem login necessário).")
+            _runtime["static_auth"] = cached_auth
         else:
             log("[Login] Abrindo navegador headless...")
             token = obter_token(log)
             if not token:
                 on_erro("Falha no login.")
                 return
-            _salvar_cache({"token": token, "token_ts": time.time()})
+            _salvar_cache({"token": token, "token_ts": time.time(),
+                           "static_auth": _runtime["static_auth"]})
         _token["value"] = token
 
         # 3. locais — usa cache se ainda válido
@@ -253,6 +257,12 @@ def obter_token(log):
             t = request.headers.get("tng-web-token")
             if t and not token_holder[0]:
                 token_holder[0] = t
+            # captura o STATIC_AUTH (authorization) dos requests ao domínio de relatórios
+            if "report.tangerino.com.br" in request.url and not _runtime["static_auth"]:
+                auth = request.headers.get("authorization", "")
+                if auth:
+                    _runtime["static_auth"] = auth
+                    log(f"[Login] STATIC_AUTH capturado automaticamente.")
 
         def on_response(response):
             url = response.url
@@ -380,8 +390,9 @@ def buscar_locais(token, log):
 # ── relatório + WebSocket ─────────────────────────────────────────────────────
 
 def _headers_api(token):
+    auth = _runtime["static_auth"] or STATIC_AUTH
     return {
-        "tng-web-token": token, "authorization": STATIC_AUTH,
+        "tng-web-token": token, "authorization": auth,
         "Content-Type": "application/json",
         "Origin":  "https://report-web.tangerino.com.br",
         "Referer": "https://report-web.tangerino.com.br/",
