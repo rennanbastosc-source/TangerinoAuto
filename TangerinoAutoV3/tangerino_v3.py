@@ -38,13 +38,33 @@ ctk.set_default_color_theme("blue")
 # ── configurações ─────────────────────────────────────────────────────────────
 
 STATIC_AUTH = ""                    # chave base64 da API — obtida via DevTools após login
-USER_CODE   = 0                     # ID do usuário (ver rede do navegador)
-USER_NAME   = "SEU NOME COMPLETO"   # nome do usuário administrador
 USER_TYPE   = "ADMINISTRATOR"
 REPORT_API  = "https://report.tangerino.com.br/async-reports"
 WS_BASE     = "wss://report.tangerino.com.br/websocket"
-WS_DEST     = f"/app/session/report/time-sheet/{USER_TYPE}_{USER_CODE}"
 LOGIN_URL   = "https://app.tangerino.com.br/Tangerino/pages/LoginPage"
+
+def _decoded_jwt(token):
+    """Decodifica o payload do JWT (sem verificar assinatura) e retorna o dict."""
+    import base64, json as _json
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)  # padding
+        return _json.loads(base64.urlsafe_b64decode(payload_b64))
+    except Exception:
+        return {}
+
+def _ws_dest(token):
+    """Retorna o destino WebSocket correto para o usuário logado."""
+    claims = _decoded_jwt(token)
+    # O JWT do Tangerino traz o ID do usuário em 'sub', 'userId' ou 'id'
+    user_id = claims.get("sub") or claims.get("userId") or claims.get("id") or 0
+    return f"/app/session/report/time-sheet/{USER_TYPE}_{user_id}"
+
+def _user_name(token):
+    """Retorna o nome do usuário extraído do JWT."""
+    claims = _decoded_jwt(token)
+    return claims.get("name") or claims.get("username") or claims.get("sub") or "ADMINISTRATOR"
+
 FOLHA_URL   = "https://app.tangerino.com.br/Tangerino/pages/folha-ponto?funcionalidade=24&wicket:pageMapName=wicket-0"
 
 PASTA_DESTINO = Path.home() / "Documents" / "Conferencia Diaria V3"
@@ -382,7 +402,7 @@ def solicitar_relatorio(token, data_ini, data_fim, workplace_id, log):
             "showHorasIntrajornada": False,
         },
         "type": "TIME_SHEET",
-        "user": {"name": USER_NAME, "type": USER_TYPE},
+        "user": {"name": _user_name(token), "type": USER_TYPE},
     }
     for tentativa in range(2):
         resp = _mods["requests"].post(REPORT_API, json=payload,
@@ -419,7 +439,9 @@ def aguardar_pdf(token, log):
         elif msg.startswith("a"):
             for frame in _json.loads(msg[1:]):
                 if frame.startswith("CONNECTED"):
-                    ws.send(_json.dumps([f"SUBSCRIBE\nid:sub-1\ndestination:{WS_DEST}\n\n\x00"]))
+                    dest = _ws_dest(token)
+                    log(f"[WS] Inscrito em: {dest}")
+                    ws.send(_json.dumps([f"SUBSCRIBE\nid:sub-1\ndestination:{dest}\n\n\x00"]))
                     log("[WS] Aguardando PDF...")
                 elif "MESSAGE" in frame and "time-sheet" in frame:
                     body = frame[frame.find("\n\n") + 2:].rstrip("\x00")
