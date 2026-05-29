@@ -2,6 +2,8 @@ import subprocess, sys, threading, queue, traceback, json, time, ctypes, os
 from datetime import datetime
 from pathlib import Path
 
+_NO_WINDOW = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+
 # Registra AppUserModelID antes de criar qualquer janela para que o Windows
 # mostre o ícone correto na barra de tarefas (não o ícone do python.exe)
 try:
@@ -27,7 +29,7 @@ if not _FROZEN:
             __import__(_pkg)
         except ImportError:
             subprocess.check_call([sys.executable, "-m", "pip", "install", _pkg],
-                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **_NO_WINDOW)
 
 import customtkinter as ctk
 from tkcalendar import DateEntry
@@ -82,6 +84,37 @@ PASTA_LOGS.mkdir(exist_ok=True)
 EXCLUIDOS        = {"RENANN BASTOS CAVALCANTE"}
 HORARIO_OVERRIDE = {"ALEXANDRA MARQUES DE LIMA": "07:00-17:00"}
 TOLERANCIA       = 10
+
+# ── automação / configurações ─────────────────────────────────────────────────
+
+def _ler_settings():
+    c = _ler_cache()
+    return {
+        "auto_enabled":       c.get("auto_enabled", False),
+        "auto_hora":          c.get("auto_hora", "17:00"),
+        "start_with_windows": c.get("start_with_windows", False),
+    }
+
+def _set_startup_windows(ativar, com_tray=True):
+    import platform as _plat
+    if _plat.system() != "Windows":
+        return
+    try:
+        import winreg
+        chave = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, chave, 0, winreg.KEY_SET_VALUE)
+        if ativar:
+            exe = sys.executable if _FROZEN else f'"{sys.executable}" "{Path(__file__).resolve()}"'
+            cmd = f'{exe} --tray' if com_tray else exe
+            winreg.SetValueEx(k, "TangerinoAuto", 0, winreg.REG_SZ, cmd)
+        else:
+            try:
+                winreg.DeleteValue(k, "TangerinoAuto")
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(k)
+    except Exception:
+        pass
 DIAS_SEMANA      = {0: "Segunda", 1: "Ter", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "S", 6: "Dom"}
 COR_HEADER       = (31, 73, 125)
 COR_ALT          = (217, 226, 243)
@@ -159,7 +192,7 @@ def _inicializar(log, on_locais_prontos, on_erro):
             except ImportError:
                 log(f"[Init] Instalando {pkg}...")
                 subprocess.check_call([sys.executable, "-m", "pip", "install", pkg],
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **_NO_WINDOW)
                 _mods[mod] = __import__(mod)
 
         from playwright.sync_api import sync_playwright
@@ -176,7 +209,7 @@ def _inicializar(log, on_locais_prontos, on_erro):
                 result = subprocess.run(
                     [str(_node), str(_cli), "install", "chromium"],
                     capture_output=True, check=False,
-                    env={**os.environ},
+                    env={**os.environ}, **_NO_WINDOW,
                 )
                 if result.returncode != 0:
                     log(f"[Init] Aviso Chromium: {result.stderr.decode(errors='ignore')[:300]}")
@@ -184,7 +217,7 @@ def _inicializar(log, on_locais_prontos, on_erro):
                 log(f"[Init] Driver não localizado em {_node}")
         else:
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium", "--quiet"],
-                           capture_output=True)
+                           capture_output=True, **_NO_WINDOW)
 
         from docx.shared import Pt, RGBColor, Cm
         from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -243,6 +276,10 @@ def obter_token(log):
 
     token_holder  = [None]
     locais_holder = [None]
+
+    # suprime janelas de console do Node no Windows
+    if sys.platform == "win32":
+        os.environ.setdefault("PLAYWRIGHT_NODEJS_NO_CONSOLE", "1")
 
     with _mods["sync_playwright"]() as p:
         browser = p.chromium.launch(headless=True, args=[
@@ -656,8 +693,43 @@ def _gerar_pagina_docx(doc, data_str, nome_local, ocorrencias):
     rr.italic = True; rr.font.size = Pt(8); rr.font.color.rgb = RGBColor(100, 100, 100)
 
 
+def _gerar_pagina_sem_ocorrencias(doc, label, nome_local):
+    """Página explicativa quando não há ocorrências detectadas no período."""
+    from docx import Document
+    Pt = _mods["Pt"]; RGBColor = _mods["RGBColor"]; Cm = _mods["Cm"]
+    WA = _mods["WD_ALIGN_PARAGRAPH"]
+
+    t = doc.add_paragraph(); t.alignment = WA.CENTER
+    r = t.add_run("REGISTRO DE OCORRÊNCIAS DE PONTO")
+    r.bold = True; r.font.size = Pt(14); r.font.color.rgb = RGBColor(*COR_HEADER)
+
+    s = doc.add_paragraph(); s.alignment = WA.CENTER
+    s.add_run(f"Local: {nome_local}").font.size = Pt(10)
+
+    dp = doc.add_paragraph(); dp.alignment = WA.CENTER
+    rp = dp.add_run(f"Período: {label}")
+    rp.font.size = Pt(10); rp.font.color.rgb = RGBColor(80, 80, 80)
+
+    doc.add_paragraph()
+
+    msg = doc.add_paragraph(); msg.alignment = WA.CENTER
+    rm = msg.add_run("Nenhuma ocorrência registrada para este período.")
+    rm.bold = True; rm.font.size = Pt(12); rm.font.color.rgb = RGBColor(60, 60, 60)
+
+    doc.add_paragraph()
+
+    obs = doc.add_paragraph(); obs.alignment = WA.CENTER
+    ro = obs.add_run(
+        "Possíveis motivos:\n"
+        "• O expediente ainda não foi encerrado e os registros de saída não foram computados.\n"
+        "• Todos os colaboradores registraram o ponto dentro do horário previsto.\n"
+        "• Não há colaboradores ativos vinculados a este local no período informado."
+    )
+    ro.font.size = Pt(10); ro.font.color.rgb = RGBColor(100, 100, 100)
+
+
 def gerar_docx(ocs_por_data, label, nome_local, pasta, log):
-    """ocs_por_data: dict {data_str: [ocorrencias]} ordenado cronologicamente."""
+    """ocs_por_data: dict {data_str: [ocorrencias]} — pode ser vazio."""
     from docx import Document
     Pt = _mods["Pt"]; RGBColor = _mods["RGBColor"]; Cm = _mods["Cm"]
     WO = _mods["WD_ORIENT"]
@@ -670,16 +742,20 @@ def gerar_docx(ocs_por_data, label, nome_local, pasta, log):
     sec.left_margin = Cm(2);    sec.right_margin  = Cm(2)
 
     datas = list(ocs_por_data.items())
-    for i, (data_str, ocorrencias) in enumerate(datas):
-        if i > 0:
-            # quebra de página entre datas
-            doc.add_page_break()
-        _gerar_pagina_docx(doc, data_str, nome_local, ocorrencias)
+    if datas:
+        for i, (data_str, ocorrencias) in enumerate(datas):
+            if i > 0:
+                doc.add_page_break()
+            _gerar_pagina_docx(doc, data_str, nome_local, ocorrencias)
+        desc = f"{len(datas)} página(s)"
+    else:
+        _gerar_pagina_sem_ocorrencias(doc, label, nome_local)
+        desc = "sem ocorrências"
 
     arq = f"justificativas_{label.replace('/', '-').replace(' a ', '_a_')}.docx"
     caminho = pasta / arq
     doc.save(str(caminho))
-    log(f"[DOCX] Salvo: {arq} ({len(datas)} página(s))")
+    log(f"[DOCX] Salvo: {arq} ({desc})")
     return caminho
 
 
@@ -706,9 +782,11 @@ class TangerinoApp(ctk.CTk):
         except Exception:
             pass
         self._log_queue  = queue.Queue()
-        self._all_logs   = []   # acumula todos os logs para diagnóstico
+        self._all_logs   = []
         self._rodando    = False
         self._local_vars = {}
+        self._tray_icon  = None
+        self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
         self._poll_log()
         self._build_login_ui()
 
@@ -868,6 +946,10 @@ class TangerinoApp(ctk.CTk):
         self._popular(locais)
         self._btn.configure(state="normal", text="▶  Gerar Relatório")
         self._log("[Init] Conectado com sucesso.")
+        self._init_tray()
+        self._iniciar_agendador()
+        if _ler_settings()["auto_enabled"] and "--tray" in sys.argv:
+            self.after(500, self._ocultar_janela)
 
     # ── tela principal ────────────────────────────────────────────────────────
 
@@ -878,6 +960,10 @@ class TangerinoApp(ctk.CTk):
                      font=ctk.CTkFont(size=22, weight="bold"), text_color="white").pack(pady=(12,2))
         ctk.CTkLabel(header, text="v3.0 — Gerador de Folha de Ponto",
                      font=ctk.CTkFont(size=12), text_color=LARANJA_SUBTIT).pack(pady=(0,12))
+        ctk.CTkButton(header, text="⚙", width=30, height=30,
+                      fg_color="transparent", hover_color=LARANJA_HOVER,
+                      text_color="white", font=ctk.CTkFont(size=16),
+                      command=self._abrir_config).place(relx=1.0, rely=0.0, anchor="ne", x=-6, y=6)
 
         ctk.CTkLabel(self, text="Local de Trabalho",
                      font=ctk.CTkFont(size=13, weight="bold"), anchor="w").pack(fill="x", padx=24, pady=(10,4))
@@ -1156,14 +1242,14 @@ class TangerinoApp(ctk.CTk):
                     d += timedelta(days=1)
                 total = sum(len(v) for v in ocs_por_data.values())
                 self._log(f"[DOCX] {total} ocorrência(s) em {len(ocs_por_data)} dia(s) com pendência.")
-                if ocs_por_data:
-                    gerar_docx(ocs_por_data, label, nome_local, pasta, self._log)
-                else:
-                    self._log("[DOCX] Sem ocorrências — arquivo não gerado.")
+                gerar_docx(ocs_por_data, label, nome_local, pasta, self._log)
 
             self._log("\n✓  Concluído!")
             self._salvar_log_execucao()
-            os.startfile(str(PASTA_DESTINO))
+            if getattr(self, "_notificar_auto", False):
+                self._notificar("Tangerino Auto", "Relatórios gerados com sucesso.")
+            if getattr(self, "_abrir_pasta_auto", True):
+                os.startfile(str(PASTA_DESTINO))
         except Exception:
             tb = traceback.format_exc()
             self._log(f"✗  Erro:\n{tb}")
@@ -1172,7 +1258,184 @@ class TangerinoApp(ctk.CTk):
                 titulo="Erro inesperado na emissão", conteudo_extra=tb))
         finally:
             self._rodando = False
+            self._abrir_pasta_auto = True
+            self._notificar_auto   = False
             self.after(0, lambda: self._btn.configure(state="normal", text="▶  Gerar Relatório"))
+
+
+    # ── automação ─────────────────────────────────────────────────────────────
+
+    def _abrir_config(self):
+        s = _ler_settings()
+        auto_obras_salvas = set(_ler_cache().get("auto_obras", []))
+
+        pop = ctk.CTkToplevel(self)
+        pop.title("Configurações")
+        pop.geometry("380x540")
+        pop.resizable(False, True)
+        pop.grab_set()
+        pop.after(50, pop.lift)
+
+        ctk.CTkLabel(pop, text="Automação",
+                     font=ctk.CTkFont(size=14, weight="bold")
+                     ).pack(anchor="w", padx=20, pady=(16, 8))
+
+        var_startup = ctk.BooleanVar(value=s["start_with_windows"])
+        ctk.CTkSwitch(pop, text="Iniciar com o Windows",
+                      variable=var_startup).pack(anchor="w", padx=20, pady=4)
+
+        var_auto = ctk.BooleanVar(value=s["auto_enabled"])
+        ctk.CTkSwitch(pop, text="Gerar relatório automaticamente",
+                      variable=var_auto).pack(anchor="w", padx=20, pady=4)
+
+        row = ctk.CTkFrame(pop, fg_color="transparent")
+        row.pack(anchor="w", padx=20, pady=(4, 12))
+        ctk.CTkLabel(row, text="Horário:", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 8))
+        var_hora = ctk.StringVar(value=s["auto_hora"])
+        ctk.CTkEntry(row, textvariable=var_hora, width=80,
+                     font=ctk.CTkFont(size=12)).pack(side="left")
+        ctk.CTkLabel(row, text="(HH:MM)", font=ctk.CTkFont(size=11),
+                     text_color="gray").pack(side="left", padx=(6, 0))
+
+        ctk.CTkLabel(pop, text="Obras (geração automática)",
+                     font=ctk.CTkFont(size=14, weight="bold")
+                     ).pack(anchor="w", padx=20, pady=(4, 6))
+
+        row_sel = ctk.CTkFrame(pop, fg_color="transparent")
+        row_sel.pack(anchor="w", padx=20, pady=(0, 4))
+        obras_vars = {}
+
+        def _sel_todas_cfg(v):
+            for bv in obras_vars.values():
+                bv.set(v)
+
+        ctk.CTkButton(row_sel, text="Todas", width=80, height=24,
+                      font=ctk.CTkFont(size=11), fg_color=LARANJA, hover_color=LARANJA_HOVER,
+                      command=lambda: _sel_todas_cfg(True)).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(row_sel, text="Nenhuma", width=80, height=24,
+                      font=ctk.CTkFont(size=11), fg_color="gray60", hover_color="gray50",
+                      command=lambda: _sel_todas_cfg(False)).pack(side="left")
+
+        frame_obras = ctk.CTkScrollableFrame(pop, height=150, corner_radius=6)
+        frame_obras.pack(fill="x", padx=20, pady=(0, 12))
+
+        for nome in sorted(self._local_vars.keys()):
+            marcado = (nome in auto_obras_salvas) if auto_obras_salvas else True
+            bv = ctk.BooleanVar(value=marcado)
+            obras_vars[nome] = bv
+            ctk.CTkCheckBox(frame_obras, text=nome, variable=bv,
+                            font=ctk.CTkFont(size=11)).pack(anchor="w", padx=8, pady=2)
+
+        lbl_err = ctk.CTkLabel(pop, text="", text_color="red", font=ctk.CTkFont(size=11))
+        lbl_err.pack()
+
+        def _salvar():
+            hora = var_hora.get().strip()
+            try:
+                datetime.strptime(hora, "%H:%M")
+            except ValueError:
+                lbl_err.configure(text="⚠  Horário inválido. Use HH:MM")
+                return
+            obras_sel = [n for n, bv in obras_vars.items() if bv.get()]
+            _salvar_cache({
+                "auto_enabled":       var_auto.get(),
+                "auto_hora":          hora,
+                "start_with_windows": var_startup.get(),
+                "auto_obras":         obras_sel,
+            })
+            _set_startup_windows(var_startup.get(), com_tray=True)
+            pop.destroy()
+
+        ctk.CTkButton(pop, text="Salvar", height=36,
+                      fg_color=LARANJA, hover_color=LARANJA_HOVER,
+                      command=_salvar).pack(fill="x", padx=20, pady=(0, 16))
+
+    def _init_tray(self):
+        try:
+            import pystray
+            from PIL import Image as _PILImage
+            img_path = _BASE / "tangerino.png"
+            if not img_path.exists():
+                return
+            img = _PILImage.open(str(img_path)).resize((64, 64))
+            menu = pystray.Menu(
+                pystray.MenuItem("Abrir Tangerino Auto", self._mostrar_janela, default=True),
+                pystray.MenuItem("Gerar agora", lambda: self.after(0, self._auto_gerar)),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("Sair", lambda: self.after(0, self._sair_app)),
+            )
+            self._tray_icon = pystray.Icon("TangerinoAuto", img, "Tangerino Auto", menu)
+            threading.Thread(target=self._tray_icon.run, daemon=True).start()
+        except Exception:
+            self._tray_icon = None
+
+    def _mostrar_janela(self, *_):
+        self.after(0, self.deiconify)
+        self.after(0, self.lift)
+
+    def _ocultar_janela(self):
+        self.withdraw()
+
+    def _sair_app(self):
+        if self._tray_icon:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+        self.destroy()
+
+    def _ao_fechar(self):
+        if _ler_settings()["auto_enabled"] and self._tray_icon:
+            self._ocultar_janela()
+        else:
+            self._sair_app()
+
+    def _iniciar_agendador(self):
+        def _loop():
+            ultima = None
+            while True:
+                time.sleep(30)
+                try:
+                    s = _ler_settings()
+                    if not s["auto_enabled"]:
+                        continue
+                    agora = datetime.now().strftime("%H:%M")
+                    hoje  = datetime.now().date()
+                    if agora == s["auto_hora"] and ultima != hoje:
+                        ultima = hoje
+                        self.after(0, self._auto_gerar)
+                except Exception:
+                    pass
+        threading.Thread(target=_loop, daemon=True).start()
+
+    def _auto_gerar(self):
+        if self._rodando:
+            return
+        auto_obras = set(_ler_cache().get("auto_obras", []))
+        locais = {
+            n: id_ for n, (var, id_) in self._local_vars.items()
+            if not auto_obras or n in auto_obras
+        }
+        if not locais:
+            return
+        hoje = datetime.today().date().strftime("%d/%m/%Y")
+        self._rodando = True
+        self._abrir_pasta_auto = False
+        self._notificar_auto   = True
+        if hasattr(self, "_btn"):
+            self._btn.configure(state="disabled", text="Gerando (auto)...")
+        threading.Thread(
+            target=self._executar,
+            args=(locais, hoje, hoje),
+            daemon=True
+        ).start()
+
+    def _notificar(self, titulo, msg):
+        try:
+            if self._tray_icon:
+                self._tray_icon.notify(msg, titulo)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
