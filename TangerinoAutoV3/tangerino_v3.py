@@ -803,7 +803,7 @@ class TangerinoApp(ctk.CTk):
                 pass
 
         self._btn_entrar.configure(state="disabled", text="Conectando...")
-        self._lbl_status.configure(text="Verificando credenciais...", text_color="gray")
+        self._lbl_status.configure(text="Aguarde, isso pode levar até 30 segundos...", text_color="gray")
 
         threading.Thread(target=_inicializar,
                          args=(self._log, self._on_login_prontos, self._on_login_erro),
@@ -1024,24 +1024,34 @@ class TangerinoApp(ctk.CTk):
         self._log("✓  Log copiado para a área de transferência.")
 
     def _logout(self):
-        """Limpa credenciais e token, reinicia o app na tela de login."""
+        """Limpa token e volta para a tela de login sem reiniciar o processo."""
         if self._rodando:
             self._log("⚠  Aguarde o processo atual terminar para sair.")
             return
         _invalidar_token()
         _invalidar_locais()
-        # remove credenciais e static_auth do cache
+        _runtime["static_auth"] = _ler_cache().get("static_auth", "")
+        _token["value"] = None
+        # remove token e static_auth do cache (mantém credenciais salvas)
         try:
             import json as _j
             cache = _ler_cache()
-            for k in ("token", "token_ts", "static_auth"):
+            for k in ("token", "token_ts"):
                 cache.pop(k, None)
             CACHE_FILE.write_text(_j.dumps(cache), encoding="utf-8")
         except Exception:
             pass
-        # reinicia o processo — abre na tela de login limpa
-        import os as _os
-        _os.execv(sys.executable, [sys.executable] + sys.argv)
+        # destrói todos os widgets atuais e reconstrói a tela de login
+        for w in self.winfo_children():
+            w.destroy()
+        # remove referência ao log_box para o _poll_log não tentar acessá-lo
+        if hasattr(self, "_log_box"):
+            del self._log_box
+        self._all_logs  = []
+        self._log_queue = queue.Queue()
+        self._rodando   = False
+        self._local_vars = {}
+        self._build_login_ui()
 
     def _sel_todos(self, v):
         for var, _ in self._local_vars.values():
@@ -1055,12 +1065,16 @@ class TangerinoApp(ctk.CTk):
         self._log_queue.put(msg)
 
     def _poll_log(self):
-        while not self._log_queue.empty():
-            msg = self._log_queue.get_nowait()
-            self._log_box.configure(state="normal")
-            self._log_box.insert("end", msg + "\n")
-            self._log_box.see("end")
-            self._log_box.configure(state="disabled")
+        if hasattr(self, "_log_box"):
+            try:
+                while not self._log_queue.empty():
+                    msg = self._log_queue.get_nowait()
+                    self._log_box.configure(state="normal")
+                    self._log_box.insert("end", msg + "\n")
+                    self._log_box.see("end")
+                    self._log_box.configure(state="disabled")
+            except Exception:
+                pass
         self.after(100, self._poll_log)
 
     def _iniciar(self):
