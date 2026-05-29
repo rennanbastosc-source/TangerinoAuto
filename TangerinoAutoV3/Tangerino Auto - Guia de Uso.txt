@@ -1,0 +1,92 @@
+============================================================
+  TANGERINO AUTO v3.0 — Guia de Uso
+============================================================
+
+Automação para geração da folha de ponto e relatório de
+ocorrências a partir do sistema Tangerino HR.
+
+------------------------------------------------------------
+  DOWNLOADS
+------------------------------------------------------------
+
+  Windows 10/11:
+  https://github.com/rennanbastosc-source/TangerinoAuto/releases/download/v3.5/TangerinoV3PRO-windows.zip
+
+  Mac (macOS 12+):
+  https://github.com/rennanbastosc-source/TangerinoAuto/releases/download/v3.5/TangerinoV3PRO-mac.zip
+
+------------------------------------------------------------
+  INSTALAÇÃO
+------------------------------------------------------------
+
+  1. Baixe e extraia o zip do seu sistema
+  2. Abra o arquivo TangerinoV3PRO (Windows: .exe / Mac: app)
+  3. Na primeira abertura, o Chromium será baixado
+     automaticamente (~150 MB) — aguarde sem fechar
+  4. Faça login com suas credenciais do Tangerino
+
+  Requisitos:
+  - Conta de Administrador no Tangerino
+  - Conexão com a internet
+
+------------------------------------------------------------
+  COMO USAR
+------------------------------------------------------------
+
+  LOGIN
+  • Informe e-mail e senha do Tangerino
+  • Marque "Lembrar login neste computador" para não
+    precisar digitar novamente nas próximas vezes
+
+  SELEÇÃO DE OBRAS
+  • Use a barra de pesquisa para localizar a obra
+  • Marque uma ou mais obras para gerar o relatório
+  • Botões "Selecionar todos" e "Desmarcar todos"
+    disponíveis para agilizar a seleção
+
+  PERÍODO
+  • Dia Único: seleciona uma data específica
+  • Período: seleciona um intervalo entre duas datas
+  • Botão "Hoje" define a data atual automaticamente
+  • Datas futuras são bloqueadas
+
+  GERAR RELATÓRIO
+  • Clique em "Gerar Relatório" após selecionar as obras
+    e o período desejado
+  • O app gera automaticamente para cada obra:
+      - PDF com a folha de ponto completa
+      - DOCX com as ocorrências do período
+        (faltas, ausências parciais e atrasos)
+  • Para relatórios de período, o DOCX terá uma
+    página separada por data com ocorrências
+  • Ao concluir, a pasta com os arquivos abre
+    automaticamente
+
+------------------------------------------------------------
+  ONDE FICAM OS ARQUIVOS
+------------------------------------------------------------
+
+  Documentos\Conferencia Diaria V3\
+  └── DD-MM-AAAA - NOME DA OBRA - HHhMM\
+      ├── folha_ponto_DD-MM-AAAA.pdf
+      └── justificativas_DD-MM-AAAA.docx
+
+  Os logs de execução ficam em:
+  Documentos\Conferencia Diaria V3\logs\
+
+------------------------------------------------------------
+  DICAS
+------------------------------------------------------------
+
+  • O campo "Justificativa" no DOCX fica em branco
+    para preenchimento e encaminhamento para aprovação
+
+  • Botão "Copiar Log" copia o log da sessão para
+    colar em qualquer lugar (útil para reportar erros)
+
+  • Botão "Sair" encerra a sessão e volta para o login
+
+  • Em caso de erro, um popup aparece com os detalhes
+    e o log é salvo automaticamente na pasta logs\
+
+============================================================

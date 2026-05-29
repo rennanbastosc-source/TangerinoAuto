@@ -32,8 +32,12 @@ if not _FROZEN:
 import customtkinter as ctk
 from tkcalendar import DateEntry
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("green")  # base neutra — cores primárias definidas via LARANJA
+
+LARANJA        = "#E8630A"
+LARANJA_HOVER  = "#C4520A"
+LARANJA_SUBTIT = "#FFDBB5"
 
 # ── configurações ─────────────────────────────────────────────────────────────
 
@@ -530,12 +534,24 @@ def horario_previsto(texto, data_str):
                 return [f"{ini}-{fim}" for ini, fim in pares]
     return []
 
-def pontos_do_dia(texto):
+def _linha_do_dia(texto, data_str):
+    """Retorna a linha do PDF que corresponde à data DD/MM informada."""
     import re
-    m = re.search(
-        r'\d{2}/\d{2}\s+\S+-\w+\s+((?:\d{2}:\d{2}\s+)*)\|\s*(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(-?\d+:\d+)',
-        texto
-    )
+    try:
+        dia_mes = datetime.strptime(data_str, "%d/%m/%Y").strftime("%d/%m")
+    except Exception:
+        return ""
+    for linha in texto.splitlines():
+        if re.match(rf"\s*{re.escape(dia_mes)}\b", linha):
+            return linha
+    return ""
+
+def pontos_do_dia(texto, data_str=None):
+    import re
+    padrao = r'\d{2}/\d{2}\s+\S+\s+((?:\d{2}:\d{2}\s+)*)\|\s*(\d{2}:\d{2})\s+(\d{2}:\d{2})\s+(-?\d+:\d+)'
+    # se data_str informada, filtra pela linha específica do dia
+    alvo = _linha_do_dia(texto, data_str) if data_str else texto
+    m = re.search(padrao, alvo) if alvo else None
     if not m:
         return "", 0, 0, 0
     pontos = re.findall(r'\d{2}:\d{2}', m.group(1))
@@ -560,12 +576,13 @@ def extrair_ocorrencias(caminho_pdf, data_str):
                 funcao = m.group(1).strip()
             previsto_str = HORARIO_OVERRIDE.get(nome) or \
                            " / ".join(horario_previsto(texto, data_str)) or "-"
-            if "FALTA NAO JUSTIFICADA" in texto:
+            linha_dia = _linha_do_dia(texto, data_str)
+            if "FALTA NAO JUSTIFICA" in (linha_dia or texto):
                 ocorrencias.append({"nome": nome, "funcao": funcao,
                                     "previsto": previsto_str, "registrado": "—",
                                     "ocorrencia": "Falta"})
                 continue
-            registrado, trab, prev, deficit = pontos_do_dia(texto)
+            registrado, trab, prev, deficit = pontos_do_dia(texto, data_str)
             if deficit == 0 or abs(deficit) <= TOLERANCIA:
                 continue
             ocorrencia = "Ausência parcial" if abs(deficit) >= 60 else f"Atraso {m2s(deficit)}"
@@ -592,17 +609,12 @@ def cell_write(cell, texto, negrito=False, cor_txt=None, pt=9, alinhar="left"):
     if cor_txt:
         run.font.color.rgb = _mods["RGBColor"](*cor_txt)
 
-def gerar_docx(ocorrencias, data_str, nome_local, pasta, log):
-    from docx import Document
+def _gerar_pagina_docx(doc, data_str, nome_local, ocorrencias):
+    """Adiciona uma página (cabeçalho + tabela) ao documento para uma data específica."""
+    from docx.oxml.ns import qn as _qn
+    from docx.oxml import OxmlElement as _OxmlElement
     Pt = _mods["Pt"]; RGBColor = _mods["RGBColor"]; Cm = _mods["Cm"]
-    WA = _mods["WD_ALIGN_PARAGRAPH"]; WT = _mods["WD_TABLE_ALIGNMENT"]; WO = _mods["WD_ORIENT"]
-
-    doc = Document()
-    sec = doc.sections[0]
-    sec.orientation = WO.LANDSCAPE
-    sec.page_width  = Cm(29.7); sec.page_height   = Cm(21)
-    sec.top_margin  = Cm(1.8);  sec.bottom_margin = Cm(1.8)
-    sec.left_margin = Cm(2);    sec.right_margin  = Cm(2)
+    WA = _mods["WD_ALIGN_PARAGRAPH"]; WT = _mods["WD_TABLE_ALIGNMENT"]
 
     t = doc.add_paragraph(); t.alignment = WA.CENTER
     r = t.add_run("REGISTRO DE OCORRÊNCIAS DE PONTO")
@@ -643,10 +655,31 @@ def gerar_docx(ocorrencias, data_str, nome_local, pasta, log):
     rr  = rod.add_run("* Preencha o campo Justificativa e encaminhe para aprovação.")
     rr.italic = True; rr.font.size = Pt(8); rr.font.color.rgb = RGBColor(100, 100, 100)
 
-    arq = f"justificativas_{data_str.replace('/', '-').replace(' a ', '_a_')}.docx"
+
+def gerar_docx(ocs_por_data, label, nome_local, pasta, log):
+    """ocs_por_data: dict {data_str: [ocorrencias]} ordenado cronologicamente."""
+    from docx import Document
+    Pt = _mods["Pt"]; RGBColor = _mods["RGBColor"]; Cm = _mods["Cm"]
+    WO = _mods["WD_ORIENT"]
+
+    doc = Document()
+    sec = doc.sections[0]
+    sec.orientation = WO.LANDSCAPE
+    sec.page_width  = Cm(29.7); sec.page_height   = Cm(21)
+    sec.top_margin  = Cm(1.8);  sec.bottom_margin = Cm(1.8)
+    sec.left_margin = Cm(2);    sec.right_margin  = Cm(2)
+
+    datas = list(ocs_por_data.items())
+    for i, (data_str, ocorrencias) in enumerate(datas):
+        if i > 0:
+            # quebra de página entre datas
+            doc.add_page_break()
+        _gerar_pagina_docx(doc, data_str, nome_local, ocorrencias)
+
+    arq = f"justificativas_{label.replace('/', '-').replace(' a ', '_a_')}.docx"
     caminho = pasta / arq
     doc.save(str(caminho))
-    log(f"[DOCX] Salvo: {arq}")
+    log(f"[DOCX] Salvo: {arq} ({len(datas)} página(s))")
     return caminho
 
 
@@ -679,19 +712,28 @@ class TangerinoApp(ctk.CTk):
         self._poll_log()
         self._build_login_ui()
 
+    def _centralizar(self, w, h):
+        """Define tamanho e posiciona a janela no centro do monitor."""
+        self.update_idletasks()
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x  = (sw - w) // 2
+        y  = (sh - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
     # ── tela de login ─────────────────────────────────────────────────────────
 
     def _build_login_ui(self):
-        self.geometry("440x460")
+        self._centralizar(440, 460)
         self._frame_login = ctk.CTkFrame(self, fg_color="transparent")
         self._frame_login.pack(fill="both", expand=True, padx=36, pady=28)
 
-        header = ctk.CTkFrame(self._frame_login, fg_color=("#1F4981","#1F4981"), corner_radius=10)
+        header = ctk.CTkFrame(self._frame_login, fg_color=LARANJA, corner_radius=10)
         header.pack(fill="x", pady=(0, 22))
         ctk.CTkLabel(header, text="Tangerino Auto",
                      font=ctk.CTkFont(size=22, weight="bold"), text_color="white").pack(pady=(14,2))
         ctk.CTkLabel(header, text="v3.0 — Gerador de Folha de Ponto",
-                     font=ctk.CTkFont(size=11), text_color="#AABCD4").pack(pady=(0,14))
+                     font=ctk.CTkFont(size=11), text_color=LARANJA_SUBTIT).pack(pady=(0,14))
 
         ctk.CTkLabel(self._frame_login, text="E-mail",
                      font=ctk.CTkFont(size=12, weight="bold"), anchor="w").pack(fill="x")
@@ -721,6 +763,7 @@ class TangerinoApp(ctk.CTk):
 
         self._btn_entrar = ctk.CTkButton(self._frame_login, text="Entrar", height=42,
                                           font=ctk.CTkFont(size=14, weight="bold"),
+                                          fg_color=LARANJA, hover_color=LARANJA_HOVER,
                                           command=self._fazer_login)
         self._btn_entrar.pack(fill="x")
 
@@ -820,7 +863,7 @@ class TangerinoApp(ctk.CTk):
 
     def _ir_para_principal(self, locais):
         self._frame_login.destroy()
-        self.geometry("640x640")
+        self._centralizar(640, 640)
         self._build_ui()
         self._popular(locais)
         self._btn.configure(state="normal", text="▶  Gerar Relatório")
@@ -829,12 +872,12 @@ class TangerinoApp(ctk.CTk):
     # ── tela principal ────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        header = ctk.CTkFrame(self, fg_color=("#1F4981","#1F4981"), corner_radius=10)
+        header = ctk.CTkFrame(self, fg_color=LARANJA, corner_radius=10)
         header.pack(fill="x", padx=20, pady=(20,10))
         ctk.CTkLabel(header, text="Tangerino Auto",
                      font=ctk.CTkFont(size=22, weight="bold"), text_color="white").pack(pady=(12,2))
         ctk.CTkLabel(header, text="v3.0 — Gerador de Folha de Ponto",
-                     font=ctk.CTkFont(size=12), text_color="#AABCD4").pack(pady=(0,12))
+                     font=ctk.CTkFont(size=12), text_color=LARANJA_SUBTIT).pack(pady=(0,12))
 
         ctk.CTkLabel(self, text="Local de Trabalho",
                      font=ctk.CTkFont(size=13, weight="bold"), anchor="w").pack(fill="x", padx=24, pady=(10,4))
@@ -856,14 +899,11 @@ class TangerinoApp(ctk.CTk):
         sel = ctk.CTkFrame(self, fg_color="transparent")
         sel.pack(fill="x", padx=20, pady=(0,8))
         ctk.CTkButton(sel, text="Selecionar todos", width=140, height=28,
-                      font=ctk.CTkFont(size=11),
+                      font=ctk.CTkFont(size=11), fg_color=LARANJA, hover_color=LARANJA_HOVER,
                       command=lambda: self._sel_todos(True)).pack(side="left", padx=(0,8))
         ctk.CTkButton(sel, text="Desmarcar todos", width=140, height=28,
-                      font=ctk.CTkFont(size=11), fg_color="gray40", hover_color="gray30",
+                      font=ctk.CTkFont(size=11), fg_color="gray60", hover_color="gray50",
                       command=lambda: self._sel_todos(False)).pack(side="left", padx=(0,8))
-        ctk.CTkButton(sel, text="↺ Novo login", width=110, height=28,
-                      font=ctk.CTkFont(size=11), fg_color="#7B3F00", hover_color="#5C2D00",
-                      command=self._forcar_login).pack(side="right")
 
         self._tabs = ctk.CTkTabview(self, height=80, corner_radius=8)
         self._tabs.pack(fill="x", padx=20, pady=(4, 10))
@@ -872,22 +912,24 @@ class TangerinoApp(ctk.CTk):
 
         cal_opts = dict(
             date_pattern="dd/mm/yyyy",
-            background="#1F4981", foreground="white",
-            headersbackground="#1F4981", headersforeground="white",
-            selectbackground="#2D7DD2", selectforeground="white",
-            normalbackground="#2B2B2B", normalforeground="white",
-            weekendbackground="#2B2B2B", weekendforeground="#AAAAAA",
-            othermonthbackground="#222222", othermonthforeground="#555555",
-            bordercolor="#3A3A3A", font=("Arial", 11),
+            maxdate=datetime.today().date(),
+            background=LARANJA, foreground="white",
+            headersbackground=LARANJA, headersforeground="white",
+            selectbackground=LARANJA_HOVER, selectforeground="white",
+            normalbackground="white", normalforeground="black",
+            weekendbackground="#F5F5F5", weekendforeground="#888888",
+            othermonthbackground="#EEEEEE", othermonthforeground="#AAAAAA",
+            bordercolor="#DDDDDD", font=("Arial", 11),
         )
 
         # aba Dia Único
         aba_dia = self._tabs.tab("Dia Único")
         aba_dia.columnconfigure(0, weight=1)
         self._cal_dia = DateEntry(aba_dia, width=22, **cal_opts)
-        self._cal_dia.set_date(datetime.now())
+        self._cal_dia.set_date(datetime.today().date())
         self._cal_dia.grid(row=0, column=0, padx=(0, 6), pady=10, sticky="ew")
         ctk.CTkButton(aba_dia, text="Hoje", width=70, height=32,
+                      fg_color=LARANJA, hover_color=LARANJA_HOVER,
                       command=self._set_hoje).grid(row=0, column=1, pady=10)
 
         # aba Período
@@ -897,26 +939,28 @@ class TangerinoApp(ctk.CTk):
         ctk.CTkLabel(aba_per, text="De:", font=ctk.CTkFont(size=12)).grid(
             row=0, column=0, padx=(0, 4), pady=10)
         self._cal_ini = DateEntry(aba_per, width=16, **cal_opts)
-        self._cal_ini.set_date(datetime.now())
+        self._cal_ini.set_date(datetime.today().date())
         self._cal_ini.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="ew")
         ctk.CTkLabel(aba_per, text="Até:", font=ctk.CTkFont(size=12)).grid(
             row=0, column=2, padx=(0, 4), pady=10)
         self._cal_fim = DateEntry(aba_per, width=16, **cal_opts)
-        self._cal_fim.set_date(datetime.now())
+        self._cal_fim.set_date(datetime.today().date())
         self._cal_fim.grid(row=0, column=3, pady=10, sticky="ew")
 
         self._btn = ctk.CTkButton(self, text="Inicializando...", height=44,
                                   font=ctk.CTkFont(size=14, weight="bold"),
+                                  fg_color=LARANJA, hover_color=LARANJA_HOVER,
                                   state="disabled", command=self._iniciar)
         self._btn.pack(fill="x", padx=20, pady=(4,10))
 
         log_header = ctk.CTkFrame(self, fg_color="transparent")
         log_header.pack(fill="x", padx=20)
-        ctk.CTkLabel(log_header, text="Log de Execução",
-                     font=ctk.CTkFont(size=13, weight="bold")).pack(side="left")
-        ctk.CTkButton(log_header, text="💾 Salvar Log", width=110, height=26,
-                      font=ctk.CTkFont(size=11), fg_color="gray40", hover_color="gray30",
-                      command=self._salvar_log).pack(side="right")
+        ctk.CTkButton(log_header, text="⏻  Sair", width=90, height=26,
+                      font=ctk.CTkFont(size=11), fg_color="gray60", hover_color="gray50",
+                      command=self._logout).pack(side="right", padx=(8,0))
+        ctk.CTkButton(log_header, text="📋 Copiar Log", width=110, height=26,
+                      font=ctk.CTkFont(size=11), fg_color="gray60", hover_color="gray50",
+                      command=self._copiar_log).pack(side="right")
 
         self._log_box = ctk.CTkTextbox(self, font=ctk.CTkFont(family="Consolas", size=11),
                                        height=180, state="disabled")
@@ -970,22 +1014,41 @@ class TangerinoApp(ctk.CTk):
                          args=(self._log, self._on_locais_prontos, self._on_erro),
                          daemon=True).start()
 
-    def _salvar_log(self):
+    def _copiar_log(self):
         conteudo = self._log_box.get("1.0", "end").strip()
         if not conteudo:
-            self._log("⚠  Log vazio, nada para salvar.")
+            self._log("⚠  Log vazio, nada para copiar.")
             return
-        nome = f"log_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}.txt"
-        destino = PASTA_DESTINO / nome
-        destino.write_text(conteudo, encoding="utf-8")
-        self._log(f"[Log] Salvo: {nome}")
+        self.clipboard_clear()
+        self.clipboard_append(conteudo)
+        self._log("✓  Log copiado para a área de transferência.")
+
+    def _logout(self):
+        """Limpa credenciais e token, reinicia o app na tela de login."""
+        if self._rodando:
+            self._log("⚠  Aguarde o processo atual terminar para sair.")
+            return
+        _invalidar_token()
+        _invalidar_locais()
+        # remove credenciais e static_auth do cache
+        try:
+            import json as _j
+            cache = _ler_cache()
+            for k in ("token", "token_ts", "static_auth"):
+                cache.pop(k, None)
+            CACHE_FILE.write_text(_j.dumps(cache), encoding="utf-8")
+        except Exception:
+            pass
+        # reinicia o processo — abre na tela de login limpa
+        import os as _os
+        _os.execv(sys.executable, [sys.executable] + sys.argv)
 
     def _sel_todos(self, v):
         for var, _ in self._local_vars.values():
             var.set(v)
 
     def _set_hoje(self):
-        self._cal_dia.set_date(datetime.now())
+        self._cal_dia.set_date(datetime.today().date())
 
     def _log(self, msg):
         self._all_logs.append(msg)
@@ -1066,10 +1129,21 @@ class TangerinoApp(ctk.CTk):
                 caminho = baixar_pdf(pdf_url[0], data_fim_str, pasta, self._log)
 
                 self._log("[DOCX] Gerando...")
-                ocs = extrair_ocorrencias(caminho, data_fim_str)
-                self._log(f"[DOCX] {len(ocs)} ocorrência(s).")
-                if ocs:
-                    gerar_docx(ocs, label, nome_local, pasta, self._log)
+                from datetime import timedelta
+                ini_dt = datetime.strptime(data_ini_str, "%d/%m/%Y")
+                fim_dt = datetime.strptime(data_fim_str, "%d/%m/%Y")
+                ocs_por_data = {}
+                d = ini_dt
+                while d <= fim_dt:
+                    ds  = d.strftime("%d/%m/%Y")
+                    ocs = extrair_ocorrencias(caminho, ds)
+                    if ocs:
+                        ocs_por_data[ds] = ocs
+                    d += timedelta(days=1)
+                total = sum(len(v) for v in ocs_por_data.values())
+                self._log(f"[DOCX] {total} ocorrência(s) em {len(ocs_por_data)} dia(s) com pendência.")
+                if ocs_por_data:
+                    gerar_docx(ocs_por_data, label, nome_local, pasta, self._log)
                 else:
                     self._log("[DOCX] Sem ocorrências — arquivo não gerado.")
 
