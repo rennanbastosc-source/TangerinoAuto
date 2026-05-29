@@ -137,8 +137,10 @@ def _inicializar(log, on_locais_prontos, on_erro):
         _mods["sync_playwright"] = sync_playwright
 
         if _FROZEN:
-            # No exe portátil usa node.exe + cli.js embutidos pelo PyInstaller
-            _node = _BASE / "playwright" / "driver" / "node.exe"
+            # No exe portátil usa node(.exe) + cli.js embutidos pelo PyInstaller
+            import platform as _plat
+            _node_bin = "node.exe" if _plat.system() == "Windows" else "node"
+            _node = _BASE / "playwright" / "driver" / _node_bin
             _cli  = _BASE / "playwright" / "driver" / "package" / "cli.js"
             if _node.exists() and _cli.exists():
                 log("[Init] Baixando Chromium (primeira execução)...")
@@ -617,9 +619,21 @@ class TangerinoApp(ctk.CTk):
         super().__init__()
         self.title("Tangerino Auto v2.0")
         self.resizable(False, False)
-        _ico = _BASE / "tangerino.ico"
-        if _ico.exists():
-            self.iconbitmap(default=str(_ico))
+        try:
+            import platform as _plat
+            if _plat.system() == "Windows":
+                _ico = _BASE / "tangerino.ico"
+                if _ico.exists():
+                    self.iconbitmap(default=str(_ico))
+            else:
+                import tkinter as _tk
+                _png = _BASE / "tangerino.png"
+                if _png.exists():
+                    _photo = _tk.PhotoImage(file=str(_png))
+                    self.iconphoto(True, _photo)
+                    self._icon_ref = _photo
+        except Exception:
+            pass
         self._log_queue  = queue.Queue()
         self._all_logs   = []   # acumula todos os logs para diagnóstico
         self._rodando    = False

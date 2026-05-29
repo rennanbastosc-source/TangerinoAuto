@@ -1,0 +1,124 @@
+name: Build e Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag da versao (ex: v2.1)'
+        required: true
+        default: 'v2.1'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install customtkinter tkcalendar requests websocket-client playwright python-docx pdfplumber pillow pyinstaller
+
+      - name: Build PyInstaller
+        working-directory: TangerinoAutoV2
+        run: >
+          pyinstaller --noconfirm --clean
+          --name TangerinoV2PRO
+          --onedir
+          --windowed
+          --icon "tangerino.ico"
+          --add-data "tangerino.ico;."
+          --add-data "tangerino.png;."
+          --collect-all customtkinter
+          --collect-all tkcalendar
+          --collect-all playwright
+          --collect-all pdfplumber
+          --collect-all docx
+          --hidden-import requests
+          --hidden-import websocket
+          --hidden-import pdfminer
+          --hidden-import pdfminer.high_level
+          --hidden-import pdfminer.layout
+          tangerino_v2.py
+
+      - name: Compactar
+        run: Compress-Archive -Path TangerinoAutoV2/dist/TangerinoV2PRO -DestinationPath TangerinoV2PRO-windows.zip
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: TangerinoV2PRO-windows.zip
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install customtkinter tkcalendar requests websocket-client playwright python-docx pdfplumber pillow pyinstaller
+
+      - name: Build PyInstaller
+        working-directory: TangerinoAutoV2
+        run: >
+          pyinstaller --noconfirm --clean
+          --name TangerinoV2PRO
+          --onedir
+          --windowed
+          --add-data "tangerino.png:."
+          --collect-all customtkinter
+          --collect-all tkcalendar
+          --collect-all playwright
+          --collect-all pdfplumber
+          --collect-all docx
+          --hidden-import requests
+          --hidden-import websocket
+          --hidden-import pdfminer
+          --hidden-import pdfminer.high_level
+          --hidden-import pdfminer.layout
+          tangerino_v2.py
+
+      - name: Compactar
+        run: zip -r TangerinoV2PRO-mac.zip TangerinoAutoV2/dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: TangerinoV2PRO-mac.zip
+
+  release:
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publicar Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: "Tangerino Auto ${{ github.event.inputs.version }}"
+          files: |
+            artifacts/windows/TangerinoV2PRO-windows.zip
+            artifacts/mac/TangerinoV2PRO-mac.zip
+          body: |
+            ## Tangerino Auto ${{ github.event.inputs.version }}
+
+            | Download | Sistema |
+            |---|---|
+            | `TangerinoV2PRO-windows.zip` | Windows 10/11 |
+            | `TangerinoV2PRO-mac.zip` | macOS 12+ (Apple Silicon e Intel) |
+
+            **Como usar:** extraia o zip e abra o executável.
+            Na primeira abertura o Chromium é baixado automaticamente (~150 MB).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
