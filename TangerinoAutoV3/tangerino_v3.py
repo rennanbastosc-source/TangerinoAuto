@@ -72,6 +72,8 @@ FOLHA_URL   = "https://app.tangerino.com.br/Tangerino/pages/folha-ponto?funciona
 
 PASTA_DESTINO = Path.home() / "Documents" / "Conferencia Diaria V3"
 PASTA_DESTINO.mkdir(exist_ok=True)
+PASTA_LOGS    = PASTA_DESTINO / "logs"
+PASTA_LOGS.mkdir(exist_ok=True)
 
 EXCLUIDOS        = {"RENANN BASTOS CAVALCANTE"}
 HORARIO_OVERRIDE = {"ALEXANDRA MARQUES DE LIMA": "07:00-17:00"}
@@ -772,25 +774,38 @@ class TangerinoApp(ctk.CTk):
         self.after(0, lambda: self._lbl_status.configure(text=f"✗  {msg}", text_color="#FF6B6B"))
         self.after(0, lambda: self._mostrar_log_erro())
 
-    def _mostrar_log_erro(self):
-        conteudo = "\n".join(self._all_logs)
-
-        # sempre salva em arquivo para diagnóstico
-        log_dir = _app_data if _FROZEN else Path(__file__).parent
-        log_file = log_dir / "debug.log"
+    def _salvar_log_execucao(self):
+        """Salva o log da execução atual em Conferencia Diaria V3/logs/."""
         try:
-            log_file.write_text(conteudo, encoding="utf-8")
+            ts   = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+            nome = f"log_{ts}.txt"
+            conteudo = "\n".join(self._all_logs)
+            (PASTA_LOGS / nome).write_text(conteudo, encoding="utf-8")
         except Exception:
             pass
 
+    def _mostrar_log_erro(self, titulo="Erro de inicialização", conteudo_extra=""):
+        conteudo = "\n".join(self._all_logs)
+        if conteudo_extra:
+            conteudo += "\n" + conteudo_extra
+
+        # salva na pasta de logs da aplicação
+        try:
+            ts   = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+            nome = f"erro_{ts}.txt"
+            log_file = PASTA_LOGS / nome
+            log_file.write_text(conteudo, encoding="utf-8")
+        except Exception:
+            log_file = PASTA_LOGS / "erro.txt"
+
         # popup com o conteúdo
         popup = ctk.CTkToplevel(self)
-        popup.title("Log de erro")
-        popup.geometry("560x380")
-        popup.resizable(False, False)
+        popup.title("⚠  " + titulo)
+        popup.geometry("600x420")
+        popup.resizable(True, True)
         popup.grab_set()
 
-        ctk.CTkLabel(popup, text="Detalhes do erro de inicialização:",
+        ctk.CTkLabel(popup, text=titulo + ":",
                      font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=16, pady=(12,4))
 
         box = ctk.CTkTextbox(popup, font=ctk.CTkFont(family="Consolas", size=10))
@@ -1032,10 +1047,16 @@ class TangerinoApp(ctk.CTk):
                 ok, token = solicitar_relatorio(token, ini_api, fim_api, wid, self._log)
                 if not ok:
                     self._log("✗  Falha ao solicitar relatório.")
+                    self._salvar_log_execucao()
+                    self.after(0, lambda n=nome_local: self._mostrar_log_erro(
+                        titulo=f"Falha ao solicitar relatório — {n}"))
                     continue
                 t.join(timeout=90)
                 if not pdf_url[0]:
-                    self._log("✗  PDF não recebido.")
+                    self._log("✗  PDF não recebido (timeout 90s).")
+                    self._salvar_log_execucao()
+                    self.after(0, lambda n=nome_local: self._mostrar_log_erro(
+                        titulo=f"PDF não recebido — {n}"))
                     continue
 
                 pasta = criar_pasta_entrega(nome_local, label)
@@ -1053,9 +1074,14 @@ class TangerinoApp(ctk.CTk):
                     self._log("[DOCX] Sem ocorrências — arquivo não gerado.")
 
             self._log("\n✓  Concluído!")
+            self._salvar_log_execucao()
             os.startfile(str(PASTA_DESTINO))
         except Exception:
-            self._log(f"✗  Erro:\n{traceback.format_exc()}")
+            tb = traceback.format_exc()
+            self._log(f"✗  Erro:\n{tb}")
+            self._salvar_log_execucao()
+            self.after(0, lambda: self._mostrar_log_erro(
+                titulo="Erro inesperado na emissão", conteudo_extra=tb))
         finally:
             self._rodando = False
             self.after(0, lambda: self._btn.configure(state="normal", text="▶  Gerar Relatório"))
