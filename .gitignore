@@ -1,0 +1,18 @@
+# Cache de credenciais e token — nunca commitar
+.cache.json
+debug.log
+
+# Build e distribuição do PyInstaller
+dist/
+build/
+*.spec
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Arquivos gerados pelo app
+folha_ponto_*.pdf
+justificativas_*.docx
+log_*.txt
